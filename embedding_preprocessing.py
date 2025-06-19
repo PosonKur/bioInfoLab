@@ -1,206 +1,185 @@
+"""
+install scanpy, anndata
+
+run:
+conda install -c conda-forge pyarrow fastparquet
+
+"""
+
+
+
+
+
 #!/usr/bin/env python
 """
-preprocess_prostate_visium.py
-
-Create a patch-level table (Parquet) and an optional AnnData file that combine
-UNI image embeddings with spatial transcriptomics labels.
-
-Assumptions
------------
-* Only one Visium slide is present (change SLIDE_ID derivation if you have >1).
-* `adata.obsm["spatial"]` stores spot **centre** coordinates in Visium "spot
-  space" (same units used by Space Ranger's `tissue_positions_list.csv`).
-* The embedding CSV has full-resolution pixel coordinates of the patch *top-left*
-  corner in columns `X` and `Y`.
-* Patches are laid out on a non-overlapping 224 × 224-px grid.
-
-Outputs
--------
-patch_level.parquet   : patch-level table (image-embeddings + labels)
-patch_level.h5ad      : AnnData with gene expression aggregated per patch
+preprocess_prostate_visium.py  —  AUTO-OFFSET VERSION (fixed sparse format)
 """
 
 # --------------------------------------------------------------------------- #
-# 🛠  SETTINGS –––– EDIT THESE THREE LINES ONLY
+#  EDIT ONLY THESE THREE LINES
 # --------------------------------------------------------------------------- #
-H5AD_PATH        = "/Volumes/T7/Informatik/BioInfoLab/notebooks/annotated_prostate.h5ad"
+H5AD_PATH         = "/Volumes/T7/Informatik/BioInfoLab/notebooks/annotated_prostate.h5ad"
 SCALEFACTORS_JSON = "/Volumes/T7/Informatik/BioInfoLab/notebooks/data/spatial/scalefactors_json.json"
 EMBEDDINGS_CSV    = "/Volumes/T7/Informatik/BioInfoLab/notebooks/embeddings/WSI_patch_embeddings_Prostate_Anicar_Cancer.csv"
-
-PATCH_SIZE_PX     = 224              # pixel size of one patch/tile
-PARQUET_OUT       = "patch_level.parquet"
-ANN_OUT           = "patch_level.h5ad"
 # --------------------------------------------------------------------------- #
 
-import json
-import re
-from pathlib import Path
+PATCH_SIZE_PX = 224
+PARQUET_OUT   = "patch_level.parquet"
+ANN_OUT       = "patch_level.h5ad"
 
-import anndata as ad
-import numpy as np
-import pandas as pd
+import json, re, numpy as np, pandas as pd, anndata as ad
+from collections import Counter
+from pathlib import Path
 from scipy import sparse
 
-# ---------------------------------------------------------------------------- #
-# 1.  READ INPUTS
-# ---------------------------------------------------------------------------- #
-print("Loading files …")
-
+print("Loading inputs …")
 adata = ad.read_h5ad(H5AD_PATH)
 with open(SCALEFACTORS_JSON) as f:
-    scalefactors = json.load(f)
-df_embed = pd.read_csv(EMBEDDINGS_CSV)
+    hires_scale = json.load(f)["tissue_hires_scalef"]
+dfE = pd.read_csv(EMBEDDINGS_CSV)
 
-# Make sure the embedding df has expected columns
-expected_cols = {"X", "Y"}
-missing       = expected_cols - set(df_embed.columns)
-if missing:
-    raise ValueError(f"Embedding CSV is missing columns: {missing}")
-
-# Clean up embedding dataframe – unify the patch-id column name
-patch_cols = [c for c in df_embed.columns if re.match(r"Patch_ID", c, re.I)]
+# ---- tidy embedding table -------------------------------------------------- #
+patch_cols = [c for c in dfE.columns if re.match(r"Patch_ID", c, re.I)]
 if not patch_cols:
-    raise ValueError("Could not infer a Patch_ID column in embeddings CSV.")
-if len(patch_cols) > 1:
-    # Keep the first, drop the duplicates
-    keep = patch_cols[0]
-    df_embed = df_embed.drop(columns=[c for c in patch_cols[1:]])
+    raise ValueError("No Patch_ID column found in embeddings CSV.")
+dfE = dfE.rename(columns={patch_cols[0]: "patch_id"})
+dfE["X"] = dfE["X"].astype(int)
+dfE["Y"] = dfE["Y"].astype(int)
+
+if "Slide_ID" in dfE.columns:
+    slide_id = dfE["Slide_ID"].iat[0]
 else:
-    keep = patch_cols[0]
-df_embed = df_embed.rename(columns={keep: "patch_id"})
-
-# Embedding coordinate types
-df_embed["X"] = df_embed["X"].astype(int)
-df_embed["Y"] = df_embed["Y"].astype(int)
-
-# Figure out slide / library identifier
-if "Slide_ID" in df_embed.columns:
-    slide_id = df_embed["Slide_ID"].iat[0]
-else:  # single-slide fallback
     slide_id = next(iter(adata.uns["spatial"].keys()))
-    df_embed["Slide_ID"] = slide_id
+    dfE["Slide_ID"] = slide_id
 print(f"Using slide identifier: {slide_id}")
 
-# ---------------------------------------------------------------------------- #
-# 2.  ALIGN CO-ORDINATE SYSTEMS
-# ---------------------------------------------------------------------------- #
-print("Converting spot centres -> patch top-left …")
-hires_scale = scalefactors["tissue_hires_scalef"]          # ≃0.07
-spot_centres = adata.obsm["spatial"].copy()               # (n_spots, 2)
+# ---- 1.  spot → pixel ------------------------------------------------------ #
+spot_centres = adata.obsm["spatial"].copy()
+spot_px = spot_centres * hires_scale           # ← multiply, *not* divide
+print(f"Applied hires_scale × {hires_scale:.5f} to spot coordinates")
 
-# Convert Visium spot units to pixel units of the *full-resolution* image
-spot_px = spot_centres / hires_scale
+# ---- 2.  derive grid indices for embeddings -------------------------------- #
+dfE["patch_ix"] = dfE["X"] // PATCH_SIZE_PX
+dfE["patch_iy"] = dfE["Y"] // PATCH_SIZE_PX
 
-# Get patch top-left by snapping to the 224-px grid
-patch_tl = (np.floor_divide(spot_px, PATCH_SIZE_PX) * PATCH_SIZE_PX).astype(int)
+# ---- 3.  initial grid indices for spots  ----------------------------------- #
+ix_s = (spot_px[:, 0] // PATCH_SIZE_PX).astype(int)
+iy_s = (spot_px[:, 1] // PATCH_SIZE_PX).astype(int)
 
-adata.obs["X"] = patch_tl[:, 0]
-adata.obs["Y"] = patch_tl[:, 1]
-adata.obs["Slide_ID"] = slide_id    # add slide id for safe merge
+# ---- 4.  automatic global offset (mode-to-mode) ---------------------------- #
+ix_e_mode = Counter(dfE["patch_ix"]).most_common(1)[0][0]
+iy_e_mode = Counter(dfE["patch_iy"]).most_common(1)[0][0]
+ix_s_mode = Counter(ix_s).most_common(1)[0][0]
+iy_s_mode = Counter(iy_s).most_common(1)[0][0]
 
-# ---------------------------------------------------------------------------- #
-# 3.  MERGE EMBEDDINGS ⟷ SPOTS
-# ---------------------------------------------------------------------------- #
-print("Merging embedding rows with spot meta …")
+dx = ix_e_mode - ix_s_mode       # embedding grid – spot grid
+dy = iy_e_mode - iy_s_mode
+
+print(f"Global patch-grid offset:  Δx = {dx}  Δy = {dy}  (patch units)")
+print(f"                         ≈ {dx*PATCH_SIZE_PX} px, {dy*PATCH_SIZE_PX} px")
+
+ix_s += dx
+iy_s += dy
+
+adata.obs["patch_ix"] = ix_s
+adata.obs["patch_iy"] = iy_s
+adata.obs["Slide_ID"] = slide_id
+
+# ---- 5.  merge embeddings ↔ spots ------------------------------------------ #
 spot_df = (
     adata.obs.reset_index(drop=True)
-         .loc[:, ["Slide_ID", "X", "Y", "Pathology"]]
+         .loc[:, ["Slide_ID", "patch_ix", "patch_iy", "Pathology"]]
 )
 
-merged = (df_embed.merge(
-            spot_df,
-            on=["Slide_ID", "X", "Y"],
-            how="left",
-            validate="one_to_many",        # 1 patch row  ⋖  many spots
-         ))
+merged = dfE.merge(
+    spot_df,
+    on=["Slide_ID", "patch_ix", "patch_iy"],
+    how="left",
+    validate="one_to_many",
+)
+matched = merged["Pathology"].notna().sum()
+print(f"Matched spots with labels: {matched:,}")
 
-# ---------------------------------------------------------------------------- #
-# 4.  MAJORITY-VOTE LABEL PER PATCH
-# ---------------------------------------------------------------------------- #
-print("Computing majority vote …")
-
-def majority_vote(series: pd.Series):
-    """Return (mode, vote_fraction, n_non_nan)."""
-    s = series.dropna()
-    if s.empty:
-        return pd.Series([np.nan, np.nan, 0], index=["label", "frac", "n"])
-    vc = s.value_counts()
-    return pd.Series([vc.idxmax(), vc.max() / len(s), len(s)],
-                     index=["label", "frac", "n"])
-
-label_df = (
-    merged.groupby("patch_id", sort=False)["Pathology"]
-          .apply(majority_vote)
-          .reset_index()
-          .rename(columns={
-              "label": "majority_pathology",
-              "frac":  "vote_frac",
-              "n":     "n_spots"
-          })
+# ---- 6.  majority vote per patch ------------------------------------------ #
+mode  = merged.groupby("patch_id")["Pathology"].agg(
+    lambda s: s.dropna().mode().iat[0] if not s.dropna().empty else np.nan
+)
+frac  = (
+    merged.groupby("patch_id")["Pathology"]
+          .value_counts(normalize=True)
+          .groupby(level=0)
+          .max()
+)
+count = merged.groupby("patch_id")["Pathology"].apply(
+    lambda s: s.dropna().shape[0]
 )
 
-# ---------------------------------------------------------------------------- #
-# 5.  FINAL PATCH-LEVEL TABLE
-# ---------------------------------------------------------------------------- #
-print("Building final patch-level table …")
+label_df = pd.DataFrame({
+    "patch_id":           mode.index,
+    "majority_pathology": mode.values,
+    "vote_frac":          frac.values,
+    "n_spots":            count.values,
+})
 
-# Embedding rows are already unique per patch -> simple left join
-patch_df = (
-    df_embed.merge(label_df, on="patch_id", how="left", validate="one_to_one")
-)
+# ---- 7.  final patch table ------------------------------------------------- #
+patch_df = dfE.merge(label_df, on="patch_id", how="left", validate="one_to_one")
+print("Non-null labels in patch_df:",
+      patch_df["majority_pathology"].notna().sum())
 
-# Write Parquet
 print(f"Writing {PARQUET_OUT}")
-patch_df.to_parquet(PARQUET_OUT, index=False)
+patch_df.to_parquet(
+    PARQUET_OUT,
+    engine="pyarrow",       # or "fastparquet"
+    compression="snappy",   # universally supported
+    index=False
+)
 
-# ---------------------------------------------------------------------------- #
-# 6.  (OPTIONAL)  PATCH-LEVEL AnnData
-# ---------------------------------------------------------------------------- #
-print("Aggregating gene expression per patch (this may take a minute) …")
+# ---- 8.  optional patch-level AnnData (fixed spot→patch_id mapping) ------- #
+print("Aggregating gene expression per patch …")
 
-# map spot row index → patch_id
-patch_idx = merged[["patch_id"]].copy()
-patch_idx.index = merged.index  # align with adata.obs
-adata.obs["patch_id"] = patch_idx["patch_id"]
+# Build a quick lookup of (patch_ix, patch_iy) → patch_id
+mapping = (
+    dfE[["patch_id","patch_ix","patch_iy"]]
+      .drop_duplicates(["patch_ix","patch_iy"])
+      .set_index(["patch_ix","patch_iy"])["patch_id"]
+      .to_dict()
+)
 
-# sparse or dense?
+# Map each spot in adata.obs to its patch_id
+adata.obs["patch_id"] = [
+    mapping.get((ix,iy), np.nan)
+    for ix, iy in zip(adata.obs["patch_ix"], adata.obs["patch_iy"])
+]
+
+# Now aggregate spot-level expression into patch-level
 is_sparse = sparse.issparse(adata.X)
-
-patch_order   = patch_df["patch_id"].tolist()
-gene_names    = adata.var_names.copy()
+patch_order = patch_df["patch_id"].tolist()
 
 agg_X = []
-rows  = []
-
 for pid in patch_order:
     spot_rows = np.where(adata.obs["patch_id"].values == pid)[0]
     if len(spot_rows) == 0:
-        # No spots mapped (shouldn't happen) – fill zeros
-        agg_X.append(sparse.csr_matrix((1, adata.n_vars)) if is_sparse
-                     else np.zeros((1, adata.n_vars)))
-        rows.append(pid)
-        continue
+        agg_X.append(
+            sparse.csr_matrix((1, adata.n_vars)) if is_sparse
+            else np.zeros((1, adata.n_vars))
+        )
+    else:
+        Xi = adata.X[spot_rows].mean(axis=0)
+        agg_X.append(Xi)
 
-    Xi = adata.X[spot_rows]
-    Xi = Xi.mean(axis=0)            # mean across spots
-
-    agg_X.append(Xi)
-    rows.append(pid)
-
-# Stack into matrix
+# Stack; ensure CSR format before writing
 X_patch = (sparse.vstack if is_sparse else np.vstack)(agg_X)
+if is_sparse:
+    X_patch = X_patch.tocsr()
 
-patch_obs = patch_df.set_index("patch_id")
 patch_adata = ad.AnnData(
     X=X_patch,
-    obs=patch_obs,
-    var=adata.var.copy(),          # keep gene metadata
-    obsm={"uni_embedding": patch_df.iloc[:, :1536].to_numpy(dtype="float32")}
+    obs=patch_df.set_index("patch_id"),
+    var=adata.var.copy(),
+    obsm={"uni_embedding": patch_df.iloc[:, :1536].to_numpy(dtype="float32")},
 )
 
 print(f"Writing {ANN_OUT}")
 patch_adata.write_h5ad(ANN_OUT, compression="gzip")
+print("Done ✓")
 
-print("Done.  Outputs:")
-print(f" • {Path(PARQUET_OUT).resolve()}")
-print(f" • {Path(ANN_OUT).resolve()}")
