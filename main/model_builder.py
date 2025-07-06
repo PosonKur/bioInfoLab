@@ -7,13 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 
-# Data loading utility
-def load_data(input_file, test_size=0.2, random_state=42):
-    df = pd.read_csv(input_file)
-    feature_cols = [str(i) for i in range(1536)]
-    X = df[feature_cols].values.astype(np.float32)
-    y = LabelEncoder().fit_transform(df['label'].values).astype(np.int64)
-    return train_test_split(X, y, test_size=test_size, random_state=random_state)
+
 
 # Model definitions
 class SimpleDNN(nn.Module):
@@ -44,6 +38,16 @@ class SimpleCNN(nn.Module):
         x = self.conv(x).view(x.size(0), -1)
         return self.fc(x)
 
+class SimpleAttention(nn.Module):
+    def __init__(self, input_dim, num_classes):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(embed_dim=1, num_heads=1, batch_first=True)
+        self.fc = nn.Sequential(nn.Linear(input_dim, 128), nn.ReLU(), nn.Linear(128, num_classes))
+        self.name = "ATTN"
+    def forward(self, x):
+        attn_out, _ = self.attn(x, x, x)  # x: (batch, seq_len, 1)
+        return self.fc(attn_out.squeeze(-1))
+
 # Training utility
 def train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, epochs=5):
     for epoch in range(epochs):
@@ -61,8 +65,7 @@ def train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, e
     return correct / len(test_loader.dataset)
 
 # Create and save DNN model
-def create_dnn_model(input_file, output_path, epochs=5):
-    X_train, X_test, y_train, y_test = load_data(input_file)
+def create_dnn_model(X_train, X_test, y_train, y_test, output_path,labelEncoder, epochs=5):
     train_loader = DataLoader(TensorDataset(torch.tensor(X_train), torch.tensor(y_train)), batch_size=32, shuffle=True)
     test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=32)
     model = SimpleDNN(1536, len(np.unique(y_train)))
@@ -70,19 +73,16 @@ def create_dnn_model(input_file, output_path, epochs=5):
     optimizer = optim.Adam(model.parameters())
     acc = train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, epochs)
     print(f"DNN Accuracy: {acc:.3f}")
-    # Re-fit label encoder to capture original class names
-    df = pd.read_csv(input_file)
-    le = LabelEncoder().fit(df['label'].values)
-    # Save checkpoint with weights and label classes
+
     torch.save({
         'state_dict': model.state_dict(),
-        'label_classes': le.classes_.tolist()
+        'label_classes': labelEncoder.classes_.tolist()
     }, output_path)
     print(f"DNN model + labels saved to {output_path}")
 
 # Create and save CNN model
-def create_cnn_model(input_file, output_path, epochs=5):
-    X_train, X_test, y_train, y_test = load_data(input_file)
+def create_cnn_model(X_train, X_test, y_train, y_test, output_path,labelEncoder, epochs=5):
+
     train_loader = DataLoader(TensorDataset(torch.tensor(X_train).unsqueeze(1), torch.tensor(y_train)), batch_size=32, shuffle=True)
     test_loader = DataLoader(TensorDataset(torch.tensor(X_test).unsqueeze(1), torch.tensor(y_test)), batch_size=32)
     model = SimpleCNN(len(np.unique(y_train)))
@@ -90,12 +90,24 @@ def create_cnn_model(input_file, output_path, epochs=5):
     optimizer = optim.Adam(model.parameters())
     acc = train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, epochs)
     print(f"CNN Accuracy: {acc:.3f}")
-    # Re-fit label encoder to capture original class names
-    df = pd.read_csv(input_file)
-    le = LabelEncoder().fit(df['label'].values)
-    # Save checkpoint with weights and label classes
+
     torch.save({
         'state_dict': model.state_dict(),
-        'label_classes': le.classes_.tolist()
+        'label_classes': labelEncoder.classes_.tolist()
     }, output_path)
     print(f"CNN model + labels saved to {output_path}")
+
+# Create and save Attention model
+def create_attention_model(X_train, X_test, y_train, y_test, output_path,labelEncoder, epochs=5):
+    train_loader = DataLoader(TensorDataset(torch.tensor(X_train).unsqueeze(-1), torch.tensor(y_train)), batch_size=32, shuffle=True)
+    test_loader = DataLoader(TensorDataset(torch.tensor(X_test).unsqueeze(-1), torch.tensor(y_test)), batch_size=32)
+    model = SimpleAttention(1536, len(np.unique(y_train)))
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters())
+    acc = train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, epochs)
+    print(f"ATTN Accuracy: {acc:.3f}")
+    torch.save({
+        'state_dict': model.state_dict(),
+        'label_classes': labelEncoder.classes_.tolist()
+    }, output_path)
+    print(f"Attention model + labels saved to {output_path}")
