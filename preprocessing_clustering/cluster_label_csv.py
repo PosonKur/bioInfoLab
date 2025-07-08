@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 
-DATA_PATH = "/Volumes/T7/Informatik/BioInfoLab/data/filtered_feature_bc_matrix.h5"
+DATA_PATH = "Visium_FFPE_Human_Prostate_Cancer_filtered_feature_bc_matrix_adenocarcinoma.h5"
 
 
 adata = sc.read_10x_h5(DATA_PATH)
