@@ -23,14 +23,16 @@ class SimpleDNN(nn.Module):
         return self.net(x)
 
 class SimpleCNN(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, input_dim=1536):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Conv1d(1, 16, kernel_size=5, padding=2), nn.ReLU(), nn.MaxPool1d(2),
             nn.Conv1d(16, 32, kernel_size=5, padding=2), nn.ReLU(), nn.MaxPool1d(2)
         )
+        # Calculate the output size after convolution
+        conv_output_size = 32 * (input_dim // 4)  # After two MaxPool1d(2)
         self.fc = nn.Sequential(
-            nn.Linear(32 * 384, 128), nn.ReLU(),
+            nn.Linear(conv_output_size, 128), nn.ReLU(),
             nn.Linear(128, num_classes)
         )
         self.name = "CNN"
@@ -65,37 +67,39 @@ def train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, e
     return correct / len(test_loader.dataset)
 
 # Create and save DNN model
-def create_dnn_model(X_train, X_test, y_train, y_test, output_path,labelEncoder, epochs=5):
+def create_dnn_model(X_train, X_test, y_train, y_test, output_path,labelEncoder,inputDim=1536, epochs=5):
     train_loader = DataLoader(TensorDataset(torch.tensor(X_train), torch.tensor(y_train)), batch_size=32, shuffle=True)
     test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=32)
-    model = SimpleDNN(1536, len(np.unique(y_train)))
+    model = SimpleDNN(inputDim, len(np.unique(y_train)))
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters())
     acc = train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, epochs)
     print(f"DNN Accuracy: {acc:.3f}")
 
-    torch.save({
-        'state_dict': model.state_dict(),
-        'label_classes': labelEncoder.classes_.tolist()
-    }, output_path)
-    print(f"DNN model + labels saved to {output_path}")
+    # torch.save({
+    #     'state_dict': model.state_dict(),
+    #     'label_classes': labelEncoder.classes_.tolist()
+    # }, output_path)
+    # print(f"DNN model + labels saved to {output_path}")
+    return model, acc
 
 # Create and save CNN model
-def create_cnn_model(X_train, X_test, y_train, y_test, output_path,labelEncoder, epochs=5):
-
+def create_cnn_model(X_train, X_test, y_train, y_test, output_path, labelEncoder, inputDim=1536, epochs=5):
     train_loader = DataLoader(TensorDataset(torch.tensor(X_train).unsqueeze(1), torch.tensor(y_train)), batch_size=32, shuffle=True)
     test_loader = DataLoader(TensorDataset(torch.tensor(X_test).unsqueeze(1), torch.tensor(y_test)), batch_size=32)
-    model = SimpleCNN(len(np.unique(y_train)))
+    model = SimpleCNN(len(np.unique(y_train)), inputDim)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters())
     acc = train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, epochs)
-    print(f"CNN Accuracy: {acc:.3f}")
 
-    torch.save({
-        'state_dict': model.state_dict(),
-        'label_classes': labelEncoder.classes_.tolist()
-    }, output_path)
-    print(f"CNN model + labels saved to {output_path}")
+
+    # print(f"CNN Accuracy: {acc:.3f}")
+
+    # torch.save({
+    #     'state_dict': model.state_dict(),
+    #     'label_classes': labelEncoder.classes_.tolist()
+    # }, output_path)
+    # print(f"CNN model + labels saved to {output_path}")
 
 # Create and save Attention model
 def create_attention_model(X_train, X_test, y_train, y_test, output_path,labelEncoder, epochs=5):
