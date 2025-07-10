@@ -6,9 +6,15 @@ from collections import Counter, defaultdict
 import matplotlib.pyplot as plt
 from PIL import Image
 
+spot_file="Visium_FFPE_Human_Prostate_Cancer_filtered_feature_bc_matrix_adenocarcinoma.h5"
+cluster_file = 'clusters_leiden_0.5.csv'
+output_file = 'patches_with_Majority_Cluster_4x4-grid_standard-224_adenocarcinoma.csv'
+embedding_file = 'WSI_patch_embeddings_adenocarcinoma.csv'
+
+
 
 #adata = #sc.read_10x_h5("./data/filtered_feature_bc_matrix.h5") # Reading the 10x h5 file
-adata = sc.read_visium("./",count_file="Visium_FFPE_Human_Prostate_Cancer_filtered_feature_bc_matrix_adenocarcinoma.h5") # Reading the 10x h5 file
+adata = sc.read_visium("./",count_file=spot_file) # Reading the 10x h5 file
 adata.var_names_make_unique() # Making the data unique
 adata.obs_names_make_unique() # Making the obs names 
 
@@ -35,11 +41,11 @@ def circle_patch_overlap_percentage_grid(patch_x, patch_y, x, y, radius=188.5979
         return 0.0
     return inside_both / inside_circle
 
-def find_patch_for_coordinates(pathology_rows, patch_rows):
+def find_patch_for_coordinates(cluster_rows, patch_rows):
     """
-    pathology_rows: list of dicts, each with 'X' and 'Y' keys (from combined_pathology_tissue.csv)
+    cluster_rows: list of dicts, each with 'X' and 'Y' keys (from combined_cluster_tissue.csv)
     patch_rows: list of dicts, each with 'X' and 'Y' keys (from WSI_patch_embeddings_Prostate_Anicar_Cancer_1.csv)
-    Returns: dict with patch (X, Y) tuple as key and list of (pathology_row, overlap_percentage) tuples as value, and a dict mapping patch_key to patch_row
+    Returns: dict with patch (X, Y) tuple as key and list of (cluster_row, overlap_percentage) tuples as value, and a dict mapping patch_key to patch_row
     """
     patch_dict = {}
     patch_data = {}
@@ -48,9 +54,10 @@ def find_patch_for_coordinates(pathology_rows, patch_rows):
         patch_y = int(patch['Y'])
         patch_key = (patch_x, patch_y)
         patch_data[patch_key] = patch
-    # i
 
-    for idx, path_row in pathology_rows.iterrows():
+
+    spot_num = 0
+    for idx, path_row in cluster_rows.iterrows():
         x = int(path_row['X'])
         y = int(path_row['Y'])
         for patch_key, patch in patch_data.items():
@@ -63,14 +70,17 @@ def find_patch_for_coordinates(pathology_rows, patch_rows):
                     patch_dict[patch_key] = []
                 patch_dict[patch_key].append((path_row, overlap_percentage))
 
+        print(f"Patch {spot_num} of {len(cluster_rows)}")
+        spot_num += 1
+
     return patch_dict, patch_data
 
-def majority_vote_pathology(entries, patch_center):
+def majority_vote_cluster(entries, patch_center):
     """
-    Determine the majority pathology label for a patch based on weighted votes from overlapping pathology entries.
-    Tie-breaking is done by selecting the pathology entry closest to the patch center.
+    Determine the majority cluster label for a patch based on weighted votes from overlapping cluster entries.
+    Tie-breaking is done by selecting the cluster entry closest to the patch center.
     
-    entries: list of (pathology_entry, overlap_percentage)
+    entries: list of (cluster_entry, overlap_percentage)
     patch_center: (patch_x, patch_y)
     
     Returns: (label, confidence_score)
@@ -78,7 +88,7 @@ def majority_vote_pathology(entries, patch_center):
     votes = defaultdict(float)
     total_overlap = 0
     for entry, overlap in entries:
-        votes[entry['Pathology']] += overlap
+        votes[entry['Cluster']] += overlap
         total_overlap += overlap
     
     if not votes:
@@ -109,21 +119,21 @@ def majority_vote_pathology(entries, patch_center):
         return candidates[0], confidence
     
     min_dist = float('inf')
-    closest_pathology = None
+    closest_cluster = None
     for entry, overlap in entries:
-        if entry['Pathology'] in candidates:
+        if entry['Cluster'] in candidates:
             x = int(entry['X'])
             y = int(entry['Y'])
             dist = (x - patch_center[0]) ** 2 + (y - patch_center[1]) ** 2
             if dist < min_dist:
                 min_dist = dist
-                closest_pathology = entry['Pathology']
-    return closest_pathology, confidence * 0.7
+                closest_cluster = entry['Cluster']
+    return closest_cluster, confidence * 0.7
 
 
 
 
-# Read in h5 and pathology data
+# Read in h5 and cluster data
 
 
 # createa a pandas dataframe from the adata object
@@ -136,57 +146,66 @@ adata.rename(columns={'index': 'Barcode'}, inplace=True)
 # Convert to a DataFrame
 adataDF = pd.DataFrame(adata)
 
-print(adataDF.head())
 
 
-pathology_dict = {}
-pathology_file = 'clusters_leiden_0.5.csv'
-with open(pathology_file, newline='', encoding='utf-8') as pf:
+print("reading in cluster_file")
+
+cluster_dict = {}
+with open(cluster_file, newline='', encoding='utf-8') as pf:
     reader = csv.reader(pf)
     header_p = next(reader)
     for row in reader:
         if len(row) > 1 and row[1].strip():
-            pathology_dict[row[0]] = row
+            cluster_dict[row[0]] = row
 
+
+print("match barcodes")
             
-# for each entry in adataDF, add a new column with the pathology information by matching the Barcode
+# for each entry in adataDF, add a new column with the cluster information by matching the Barcode
 for index, row in adataDF.iterrows():
     barcode = row['Barcode']
-    if barcode in pathology_dict:
-        pathology_info = pathology_dict[barcode]  # Skip the first column (Barcode)
-        adataDF.at[index, "Pathology"] = pathology_info[1]
+    if barcode in cluster_dict:
+        cluster_info = cluster_dict[barcode]  # Skip the first column (Barcode)
+        adataDF.at[index, "Cluster"] = cluster_info[1]
     else:
-        #  delte the row if the barcode is not found in the pathology_dict
+        #  delte the row if the barcode is not found in the cluster_dict
         adataDF.drop(index, inplace=True)
 
 
-pathology_rows = adataDF
+cluster_rows = adataDF
+
+print("reading embedding file")
 
 # Read WSI_patch_embeddings_Prostate_Anicar_Cancer_1.csv
-with open('WSI_patch_embeddings_adenocarcinoma.csv', newline='', encoding='utf-8') as f:
+with open(embedding_file, newline='', encoding='utf-8') as f:
     patch_reader = csv.reader(f)
     patch_header = next(patch_reader)
     patch_rows = [dict(zip(patch_header, row)) for row in patch_reader]
 
-# Find which pathology coordinates are in which patch
-patch_dict, patch_data = find_patch_for_coordinates(pathology_rows, patch_rows)
+print("find patch coordinates")
+# Find which cluster coordinates are in which patch
+patch_dict, patch_data = find_patch_for_coordinates(cluster_rows, patch_rows)
 
 # Write the results to a new CSV file
-output_file = 'patches_with_Majority_Cluster.csv'
 with open(output_file, 'w', newline='', encoding='utf-8') as outf:
     # Embedding columns are index 0 to 1535 in the patch file
     embedding_cols = patch_header[0:1536]
     fieldnames = ['Patch_X', 'Patch_Y'] + embedding_cols + ['label', 'confidence']
     writer = csv.DictWriter(outf, fieldnames=fieldnames)
     writer.writeheader()
+
+    patch_num = 0
     for patch_key, entries in patch_dict.items():
         patch_entry = patch_data[patch_key]
         patch_x, patch_y = patch_key
         patch_center = (patch_x + 112, patch_y + 112)
-        label, confidence = majority_vote_pathology(entries, patch_center)
+        label, confidence = majority_vote_cluster(entries, patch_center)
         row = {'Patch_X': patch_x, 'Patch_Y': patch_y, 'label': label, 'confidence': confidence}
         for col in embedding_cols:
             row[col] = patch_entry.get(col, '')
         writer.writerow(row)
+
+        print(f"Patch {patch_num} of {len(patch_dict.items())}")
+        patch_num += 1
 
 
