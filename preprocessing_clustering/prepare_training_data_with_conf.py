@@ -70,7 +70,7 @@ def find_patch_for_coordinates(cluster_rows, patch_rows):
                     patch_dict[patch_key] = []
                 patch_dict[patch_key].append((path_row, overlap_percentage))
 
-        print(f"Patch {spot_num} of {len(cluster_rows)}")
+        print(f"Spot {spot_num} of {len(cluster_rows)}")
         spot_num += 1
 
     return patch_dict, patch_data

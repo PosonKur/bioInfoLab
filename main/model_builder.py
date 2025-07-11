@@ -11,11 +11,11 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # Model definitions
 class SimpleDNN(nn.Module):
-    def __init__(self, input_dim, num_classes):
+    def __init__(self, input_dim, num_classes, dropout_p=0.5):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 256), nn.ReLU(),
-            nn.Linear(256, 128), nn.ReLU(),
+            nn.Linear(input_dim, 256), nn.BatchNorm1d(256), nn.ReLU(), nn.Dropout(dropout_p),
+            nn.Linear(256, 128), nn.BatchNorm1d(128), nn.ReLU(), nn.Dropout(dropout_p),
             nn.Linear(128, num_classes)
         )
         self.name = "DNN"
@@ -23,16 +23,16 @@ class SimpleDNN(nn.Module):
         return self.net(x)
 
 class SimpleCNN(nn.Module):
-    def __init__(self, num_classes, input_dim=1536):
+    def __init__(self, num_classes, input_dim=1536, dropout_p=0.5):
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv1d(1, 16, kernel_size=5, padding=2), nn.ReLU(), nn.MaxPool1d(2),
-            nn.Conv1d(16, 32, kernel_size=5, padding=2), nn.ReLU(), nn.MaxPool1d(2)
+            nn.Conv1d(1, 16, kernel_size=5, padding=2), nn.BatchNorm1d(16), nn.ReLU(), nn.MaxPool1d(2), nn.Dropout(dropout_p),
+            nn.Conv1d(16, 32, kernel_size=5, padding=2), nn.BatchNorm1d(32), nn.ReLU(), nn.MaxPool1d(2), nn.Dropout(dropout_p)
         )
         # Calculate the output size after convolution
         conv_output_size = 32 * (input_dim // 4)  # After two MaxPool1d(2)
         self.fc = nn.Sequential(
-            nn.Linear(conv_output_size, 128), nn.ReLU(),
+            nn.Linear(conv_output_size, 128), nn.BatchNorm1d(128), nn.ReLU(), nn.Dropout(dropout_p),
             nn.Linear(128, num_classes)
         )
         self.name = "CNN"
@@ -41,14 +41,22 @@ class SimpleCNN(nn.Module):
         return self.fc(x)
 
 class SimpleAttention(nn.Module):
-    def __init__(self, input_dim, num_classes):
+    def __init__(self, input_dim, num_classes, dropout_p=0.5):
         super().__init__()
         self.attn = nn.MultiheadAttention(embed_dim=1, num_heads=1, batch_first=True)
-        self.fc = nn.Sequential(nn.Linear(input_dim, 128), nn.ReLU(), nn.Linear(128, num_classes))
+        self.norm = nn.LayerNorm(input_dim)
+        self.dropout = nn.Dropout(dropout_p)
+        self.fc = nn.Sequential(
+            nn.Linear(input_dim, 128), nn.BatchNorm1d(128), nn.ReLU(), nn.Dropout(dropout_p),
+            nn.Linear(128, num_classes)
+        )
         self.name = "ATTN"
     def forward(self, x):
         attn_out, _ = self.attn(x, x, x)  # x: (batch, seq_len, 1)
-        return self.fc(attn_out.squeeze(-1))
+        x2 = attn_out.squeeze(-1)  # (batch, seq_len)
+        x2 = self.norm(x2)
+        x2 = self.dropout(x2)
+        return self.fc(x2)
 
 # Training utility
 def train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, epochs=5):
@@ -67,10 +75,10 @@ def train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, e
     return correct / len(test_loader.dataset)
 
 # Create and save DNN model
-def create_dnn_model(X_train, X_test, y_train, y_test, output_path,labelEncoder,inputDim=1536, epochs=5):
+def create_dnn_model(X_train, X_test, y_train, y_test, output_path, labelEncoder, inputDim=1536, epochs=5, dropout_p=0.5):
     train_loader = DataLoader(TensorDataset(torch.tensor(X_train), torch.tensor(y_train)), batch_size=32, shuffle=True)
     test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=32)
-    model = SimpleDNN(inputDim, len(np.unique(y_train)))
+    model = SimpleDNN(inputDim, len(np.unique(y_train)), dropout_p=dropout_p)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters())
     acc = train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, epochs)
@@ -84,10 +92,10 @@ def create_dnn_model(X_train, X_test, y_train, y_test, output_path,labelEncoder,
     return model, acc
 
 # Create and save CNN model
-def create_cnn_model(X_train, X_test, y_train, y_test, output_path, labelEncoder, inputDim=1536, epochs=5):
+def create_cnn_model(X_train, X_test, y_train, y_test, output_path, labelEncoder, inputDim=1536, epochs=5, dropout_p=0.5):
     train_loader = DataLoader(TensorDataset(torch.tensor(X_train).unsqueeze(1), torch.tensor(y_train)), batch_size=32, shuffle=True)
     test_loader = DataLoader(TensorDataset(torch.tensor(X_test).unsqueeze(1), torch.tensor(y_test)), batch_size=32)
-    model = SimpleCNN(len(np.unique(y_train)), inputDim)
+    model = SimpleCNN(len(np.unique(y_train)), inputDim, dropout_p=dropout_p)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters())
     acc = train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, epochs)
@@ -102,10 +110,10 @@ def create_cnn_model(X_train, X_test, y_train, y_test, output_path, labelEncoder
     # print(f"CNN model + labels saved to {output_path}")
 
 # Create and save Attention model
-def create_attention_model(X_train, X_test, y_train, y_test, output_path,labelEncoder, epochs=5):
+def create_attention_model(X_train, X_test, y_train, y_test, output_path, labelEncoder, epochs=5, dropout_p=0.5):
     train_loader = DataLoader(TensorDataset(torch.tensor(X_train).unsqueeze(-1), torch.tensor(y_train)), batch_size=32, shuffle=True)
     test_loader = DataLoader(TensorDataset(torch.tensor(X_test).unsqueeze(-1), torch.tensor(y_test)), batch_size=32)
-    model = SimpleAttention(1536, len(np.unique(y_train)))
+    model = SimpleAttention(1536, len(np.unique(y_train)), dropout_p=dropout_p)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters())
     acc = train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, epochs)
