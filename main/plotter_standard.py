@@ -68,7 +68,6 @@ def visualize_tissue_image_with_samples(image_path, data, width, height):
 
 
 def visualize_tissue_image_with_samples_color_labels(image_path, data, width, height):
-
     # Load the image
     img = mpimg.imread(image_path)
 
@@ -95,20 +94,15 @@ def visualize_tissue_image_with_samples_color_labels(image_path, data, width, he
     ax.set_xlim(0, width)
     ax.set_ylim(height, 0)  # Invert Y-axis
 
-    # Draw 224x224 rectangles with coordinates as centers
+    # Draw 224x224 rectangles instead of spots
     patch_size = 224  # 224x224 pixel patches
-    half_patch = patch_size // 2  # Half patch size to center the rectangles
     
     for i, (x, y) in enumerate(zip(x_coords, y_coords)):
         label = data['label'].iloc[i]
         color = color_map[label]
         
-        # Calculate upper-left corner from center coordinates
-        rect_x = x - half_patch
-        rect_y = y - half_patch
-        
-        # Create rectangle with center at (x,y)
-        rect = Rectangle((rect_x, rect_y), patch_size, patch_size, 
+        # Create rectangle with (x,y) as upper-left corner
+        rect = Rectangle((x, y), patch_size, patch_size, 
                         facecolor=color, alpha=0.7, edgecolor='black', linewidth=0.5)
         ax.add_patch(rect)
 
