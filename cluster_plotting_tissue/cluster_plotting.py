@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 import os
 
 # ---- Parameter anpassen ----
-DATA_DIR   = "/home/schever/Documents/BioInfo/cluster_plotting_tissue/"
+DATA_DIR   = "/home/schever/Documents/BioInfo/github/bioInfoLab/cluster_plotting_tissue/"
 COUNT_FILE = "Visium_FFPE_Human_Prostate_Cancer_filtered_feature_bc_matrix.h5"
-LABEL_CSV  = "/home/schever/Documents/BioInfo/cluster_plotting_tissue/annotation_prostate_cancer.csv"
+#LABEL_CSV  = "/home/schever/Documents/BioInfo/cluster_plotting_tissue/annotation_prostate_cancer.csv"
 FIG_DIR    = "figures"
 
 os.makedirs(FIG_DIR, exist_ok=True)
@@ -30,7 +30,7 @@ sc.pp.filter_cells(adata, min_genes=10)
 sc.pp.normalize_total(adata, target_sum=1e4)
 sc.pp.log1p(adata)
 sc.tl.pca(adata, svd_solver='arpack')
-sc.pp.neighbors(adata, n_neighbors=10, n_pcs=20)
+sc.pp.neighbors(adata, n_neighbors=15, n_pcs=50)
 print("Preprocessing done.")
 
 # ---- 4) Resolutions ----
