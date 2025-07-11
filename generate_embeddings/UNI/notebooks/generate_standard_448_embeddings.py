@@ -31,7 +31,7 @@ device
 
 ##############################################
 
-method = "centered_448" #Method to extract the patches
+method = "standard_448" #Method to extract the patches
 tissue = "adenocarcinoma" #Type of tissue
 
 wsi_folder = f"imgs/{tissue}/" #Where the img is located
@@ -39,7 +39,6 @@ output_base_folder = f"{method}/Patches/" #Where you want to save the patches
 embedding_file = f"{method}/{tissue}/WSI_patch_embeddings.csv" #name of the file with the embeddings
 metadata_file = f"{method}/{tissue}/WSI_patch_metadata.csv"   #name of the fiel(optional)
 local_dir = 'checkpoint_path' #Where the model is located
-spots_positions_file = f"spot_positions/{tissue}/tissue_positions_list.csv" #Where the spot positions are located
 
 os.makedirs(f"{method}", exist_ok=True)
 os.makedirs(f"{method}/{tissue}", exist_ok=True)
@@ -47,16 +46,6 @@ os.makedirs(f"{method}/Patches", exist_ok=True)
 
 #########################################################
 
-
-# Load the data
-tissue_positions_df = pd.read_csv(spots_positions_file, header=0, names=["Barcode", 0, 1, 2, "Y", "X"])
-tissue_positions = tissue_positions_df[["Barcode", "X", "Y"]]
-
-# Use .loc to explicitly set values on the DataFrame slice
-tissue_positions.loc[:, 'X'] = pd.to_numeric(tissue_positions['X'], errors='coerce').fillna(0).astype(int)
-tissue_positions.loc[:, 'Y'] = pd.to_numeric(tissue_positions['Y'], errors='coerce').fillna(0).astype(int)
-
-###########################################################
 import os
 import torch
 from torchvision import transforms
@@ -94,11 +83,10 @@ transform = transforms.Compose(
     ]
 )
 
-
-#######################################################################
+###############################################
 
 patch_size = (448, 448)  
-stride = 224  
+stride = 448  
 root_path = output_base_folder
 
 
@@ -126,22 +114,19 @@ for wsi_file in wsi_files:
         print(f"Processing {slide_name} - Size: {wsi_width}x{wsi_height}")
 
         saved_patches = 0
-        # Modify the patch generation logic to center patches around X and Y coordinates from tissue_positions_filtered
-        for index, row in tissue_positions.iterrows():
-            x_center, y_center = row['X'], row['Y']
-            x_start = max(0, x_center - patch_size[0] // 2)
-            y_start = max(0, y_center - patch_size[1] // 2)
-            x_end = min(wsi_width, x_start + patch_size[0])
-            y_end = min(wsi_height, y_start + patch_size[1])
+        for x in range(0, wsi_width - patch_size[0], stride):
+            for y in range(0, wsi_height - patch_size[1], stride):
+                patch = wsi_image.crop((x, y, x + patch_size[0], y + patch_size[1]))
 
-            patch = wsi_image.crop((x_start, y_start, x_end, y_end))
+               
+               
+                patch_filename = f"patch_{saved_patches+1}.png"
+                patch_path = os.path.join(slide_output_folder, patch_filename)
+                patch.save(patch_path)
 
-            patch_filename = f"patch_{saved_patches+1}.png"
-            patch_path = os.path.join(slide_output_folder, patch_filename)
-            patch.save(patch_path)
-
-            all_patch_metadata.append([slide_name, patch_filename, x_center, y_center, patch_path])
-            saved_patches += 1
+                
+                all_patch_metadata.append([slide_name, patch_filename, x, y, patch_path])
+                saved_patches += 1
 
         print(f"Saved {saved_patches} patches for {slide_name}")
 
@@ -157,7 +142,7 @@ print("All WSIs processed successfully!")
 print("Failed WSIs:", failed_wsi_files)
 print(f"Metadata saved in {metadata_file}")
 
-##########################################################33
+################################################
 
 from uni.downstream.extract_patch_features import extract_patch_features_from_dataloader
 from torchvision import transforms
@@ -195,20 +180,18 @@ all_embeddings = []
 all_sample_ids = []
 all_patch_ids = []  
 
-# Ensure all tensors and the model are moved to the same device
-model.to(device)
-
-# Update the patch generation logic to move tensors to the correct device
 for folder in valid_folders:
     folder_path = os.path.join(root_path, folder)
 
     test_dataset = PatchDataset(root_dir=folder_path, transform=transform)
     test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False)
 
+   
     test_features = extract_patch_features_from_dataloader(model, test_dataloader)
-    test_feats = torch.Tensor(test_features['embeddings']).to(device)  # Move embeddings to the same device
+    test_feats = torch.Tensor(test_features['embeddings'])
 
-    all_embeddings.append(test_feats.cpu().numpy())  # Convert to NumPy after moving to CPU
+    
+    all_embeddings.append(test_feats.numpy())  # Convert to NumPy
     all_sample_ids.extend([folder] * test_feats.shape[0])  # Assign folder name to each patch
     all_patch_ids.extend(test_dataset.patch_ids)  
 
@@ -224,4 +207,3 @@ df_embeddings['match_id']=df_embeddings['Slide_ID']+'_'+df_embeddings['Patch_ID'
 metadata_df['match_id']=metadata_df['Slide_ID']+'_'+metadata_df['Patch_ID']
 df_embeddings=df_embeddings.merge(metadata_df[['match_id','X','Y','Patch_ID']],on='match_id')
 df_embeddings.to_csv(embedding_file,index=False) #final file
-
