@@ -6,10 +6,12 @@ from collections import Counter, defaultdict
 import matplotlib.pyplot as plt
 from PIL import Image
 
+
+res= 0.3
 spot_file="Visium_FFPE_Human_Prostate_Cancer_filtered_feature_bc_matrix_adenocarcinoma.h5"
-cluster_file = 'clusters_leiden_0.5.csv'
-output_file = 'patches_with_Majority_Cluster_4x4-grid_standard-224_adenocarcinoma.csv'
-embedding_file = 'WSI_patch_embeddings_adenocarcinoma.csv'
+cluster_file = f'clusters_leiden_{res}.csv'
+output_file = f"training_data_output/WSI_patch_embeddings_standard-448_adenocarcinoma_leiden_{res}_training-data.csv"
+embedding_file = 'embeddings/WSI_patch_embeddings_standard-448_adenocarcinoma.csv'
 
 
 
@@ -20,7 +22,7 @@ adata.obs_names_make_unique() # Making the obs names
 
 
 # functions
-def circle_patch_overlap_percentage_grid(patch_x, patch_y, x, y, radius=188.5979256687412 / 2, patch_size=224, grid_size=4):
+def circle_patch_overlap_percentage_grid(patch_x, patch_y, x, y, radius=188.5979256687412 / 2, patch_size=224, grid_size=10):
     """
     Deterministically estimate the percentage of the circle overlapping with the patch using a grid.
     """

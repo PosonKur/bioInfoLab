@@ -3,10 +3,10 @@ import pandas as pd
 import os
 
 # Define file paths
-
-clusters_csv_path = "clusters_leiden_0.5.csv"
-wsi_csv_path = "WSI_patch_embeddings_centered-224_adenocarcinoma.csv"
-output_path = "WSI_patch_embeddings_centered-224_adenocarcinoma_training-data.csv"
+res = 0.3
+clusters_csv_path = f"clusters_leiden_{res}.csv"
+wsi_csv_path = "embeddings/WSI_patch_embeddings_centered-448_adenocarcinoma.csv"
+output_path = f"training_data_output/WSI_patch_embeddings_centered-448_adenocarcinoma_leiden_{res}_training-data.csv"
 tissue_csv_path = "spatial/tissue_positions_list.csv"
 
 def create_barcode_mapping(tissue_csv_path, clusters_csv_path):
