@@ -5,16 +5,15 @@ import matplotlib.pyplot as plt
 import os
 
 # ---- Parameter anpassen ----
-DATA_DIR   = "/home/schever/Documents/BioInfo/github/bioInfoLab/cluster_plotting_tissue/"
-COUNT_FILE = "Visium_FFPE_Human_Prostate_Cancer_filtered_feature_bc_matrix.h5"
+COUNT_FILE = "filtered_feature_bc_matrix_adenocarcinoma.h5"
 #LABEL_CSV  = "/home/schever/Documents/BioInfo/cluster_plotting_tissue/annotation_prostate_cancer.csv"
-FIG_DIR    = "figures"
+FIG_DIR    = "figures_adenocarcinoma"
 
 os.makedirs(FIG_DIR, exist_ok=True)
 
 # ---- 1) Read the Visium dataset (mit Bilddaten!) ----
 adata = sc.read_visium(
-    path=DATA_DIR,
+    path='./',
     count_file=COUNT_FILE,
     load_images=True
 )
