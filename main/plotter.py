@@ -67,7 +67,7 @@ def visualize_tissue_image_with_samples(image_path, data, width, height):
 
 
 
-def visualize_tissue_image_with_samples_color_labels(image_path, data, width, height):
+def visualize_tissue_image_with_samples_color_labels(image_path, data, width, height,output_path=None):
 
     # Load the image
     img = mpimg.imread(image_path)
@@ -126,5 +126,10 @@ def visualize_tissue_image_with_samples_color_labels(image_path, data, width, he
     legend_patches = [mpatches.Patch(color=color_map[label], label=label) for label in unique_labels]
     ax.legend(handles=legend_patches, bbox_to_anchor=(1.05, 1), loc='upper left', title="Pathology")
 
-    # Show the plot
-    plt.show()
+    # Save the plot if output_path is provided
+    if output_path:
+        plt.savefig(output_path, bbox_inches='tight', dpi=300)
+        plt.close(fig)
+    else:
+        # Show the plot
+        plt.show()

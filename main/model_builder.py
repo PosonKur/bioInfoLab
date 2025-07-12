@@ -99,6 +99,7 @@ def create_cnn_model(X_train, X_test, y_train, y_test, output_path, labelEncoder
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters())
     acc = train_and_evaluate(model, train_loader, test_loader, criterion, optimizer, epochs)
+    return model, acc
 
 
     # print(f"CNN Accuracy: {acc:.3f}")
