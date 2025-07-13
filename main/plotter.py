@@ -69,6 +69,8 @@ def visualize_tissue_image_with_samples(image_path, data, width, height):
 
 def visualize_tissue_image_with_samples_color_labels(image_path, data, width, height,output_path=None):
 
+    patch_size = 448
+    half_patch = patch_size // 2  # Half patch size to center the rectangles
     # Load the image
     img = mpimg.imread(image_path)
 
@@ -94,10 +96,6 @@ def visualize_tissue_image_with_samples_color_labels(image_path, data, width, he
     # Set axis limits to match the coordinate system
     ax.set_xlim(0, width)
     ax.set_ylim(height, 0)  # Invert Y-axis
-
-    # Draw 224x224 rectangles with coordinates as centers
-    patch_size = 224  # 224x224 pixel patches
-    half_patch = patch_size // 2  # Half patch size to center the rectangles
     
     for i, (x, y) in enumerate(zip(x_coords, y_coords)):
         label = data['label'].iloc[i]
@@ -113,18 +111,18 @@ def visualize_tissue_image_with_samples_color_labels(image_path, data, width, he
         ax.add_patch(rect)
 
     # Add a fine grid where each rectangle equals 224x224
-    for x in range(0, width, 224):
+    for x in range(0, width, patch_size):
         ax.axvline(x, color='gray', linestyle='--', linewidth=0.5)
-    for y in range(0, height, 224):
+    for y in range(0, height, patch_size):
         ax.axhline(y, color='gray', linestyle='--', linewidth=0.5)
 
     # Set axis labels
-    ax.set_xlabel("X-axis (pixels)")
-    ax.set_ylabel("Y-axis (pixels)")
+    ax.set_xlabel("Pixels")
+    ax.set_ylabel("Pixels")
     
     # Create legend
     legend_patches = [mpatches.Patch(color=color_map[label], label=label) for label in unique_labels]
-    ax.legend(handles=legend_patches, bbox_to_anchor=(1.05, 1), loc='upper left', title="Pathology")
+    ax.legend(handles=legend_patches, bbox_to_anchor=(1.05, 1), loc='upper left', title="Cluster")
 
     # Save the plot if output_path is provided
     if output_path:
