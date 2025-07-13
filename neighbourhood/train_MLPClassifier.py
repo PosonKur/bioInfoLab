@@ -35,43 +35,48 @@ y_concat_train = df_concat_train['label']
 X_concat_test = df_concat_test.drop(columns=['Patch_X', 'Patch_Y', 'label'])
 y_concat_test = df_concat_test['label']
 
+def plot_confusion_matrix(matrix, title, class_names, fname, normalize=False):
+    plt.figure(figsize=(8, 7))
+    cmap = plt.cm.Blues
+    im = plt.imshow(matrix, cmap=cmap, vmin=0, vmax=(1.0 if normalize else None))
+    plt.title(title, fontsize=18)
+    plt.xlabel("Predicted label", fontsize=16)
+    plt.ylabel("True label", fontsize=16)
+    plt.xticks(np.arange(len(class_names)), class_names, rotation=45, ha='right', fontsize=14)
+    plt.yticks(np.arange(len(class_names)), class_names, fontsize=14)
+    fmt = ".2f" if normalize else "d"
+    thresh = matrix.max() / 2. if not normalize else 0.5
+    # Zahlen mit Kontrast (weiß auf dunkel, schwarz auf hell)
+    for i in range(matrix.shape[0]):
+        for j in range(matrix.shape[1]):
+            value = matrix[i, j]
+            color = "white" if value > thresh else "black"
+            plt.text(j, i, format(value, fmt),
+                     ha="center", va="center",
+                     color=color, fontsize=18, fontweight='bold')
+    plt.colorbar(im, fraction=0.046, pad=0.04)
+    plt.tight_layout(rect=[0, 0.07, 1, 1])
+    plt.savefig(fname)
+    plt.close()
+    print(f"  Confusion matrix plot saved as {fname}")
+
 def plot_and_save_confusion(y_true, y_pred, class_names, fname_base):
     cm = confusion_matrix(y_true, y_pred)
     cm_norm = confusion_matrix(y_true, y_pred, normalize='true')
-    fig, axs = plt.subplots(1, 2, figsize=(12, 5))
-
-    # Absolute
-    im0 = axs[0].imshow(cm, cmap='Blues')
-    axs[0].set_title("Confusion Matrix (absolute)")
-    axs[0].set_xlabel("Predicted label")
-    axs[0].set_ylabel("True label")
-    axs[0].set_xticks(np.arange(len(class_names)))
-    axs[0].set_yticks(np.arange(len(class_names)))
-    axs[0].set_xticklabels(class_names, rotation=45)
-    axs[0].set_yticklabels(class_names)
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            axs[0].text(j, i, cm[i, j], ha='center', va='center', color='black', fontsize=8)
-    fig.colorbar(im0, ax=axs[0])
-
-    # Normalized
-    im1 = axs[1].imshow(cm_norm, cmap='Blues', vmin=0, vmax=1)
-    axs[1].set_title("Confusion Matrix (row-normalized)")
-    axs[1].set_xlabel("Predicted label")
-    axs[1].set_ylabel("True label")
-    axs[1].set_xticks(np.arange(len(class_names)))
-    axs[1].set_yticks(np.arange(len(class_names)))
-    axs[1].set_xticklabels(class_names, rotation=45)
-    axs[1].set_yticklabels(class_names)
-    for i in range(cm_norm.shape[0]):
-        for j in range(cm_norm.shape[1]):
-            axs[1].text(j, i, f"{cm_norm[i, j]:.2f}", ha='center', va='center', color='black', fontsize=8)
-    fig.colorbar(im1, ax=axs[1])
-
-    plt.tight_layout()
-    plt.savefig(f"{fname_base}_confusion_matrix.png")
-    plt.close()
-    print(f"  Confusion matrix plots saved as {fname_base}_confusion_matrix.png")
+    plot_confusion_matrix(
+        cm,
+        "Confusion Matrix (absolute)",
+        class_names,
+        f"{fname_base}_confusion_matrix_absolute.png",
+        normalize=False
+    )
+    plot_confusion_matrix(
+        cm_norm,
+        "Confusion Matrix (row-normalized)",
+        class_names,
+        f"{fname_base}_confusion_matrix_normalized.png",
+        normalize=True
+    )
 
 def plot_and_save_loss_curve(loss_curve, fname):
     plt.figure()
@@ -106,7 +111,7 @@ def evaluate_and_report(model, X_train, y_train, X_test, y_test, name):
     # Loss-Kurve
     plot_and_save_loss_curve(model.loss_curve_, f"{name}_loss_curve.png")
 
-    # Confusion Matrix
+    # Confusion Matrix (zwei einzelne Plots, wie gewünscht)
     class_names = np.unique(np.concatenate([y_train, y_test]))
     plot_and_save_confusion(y_test, model.predict(X_test), class_names, name)
 
@@ -129,6 +134,12 @@ evaluate_and_report(mlp_single, X_single_train, y_single_train, X_single_test, y
 # Optional: Modell speichern
 joblib.dump(mlp_single, "mlp_single_patch.joblib")
 
+# ---- SPEICHERE Testdaten mit Vorhersagen (y_pred) für Single Patch ----
+y_pred_single = mlp_single.predict(X_single_test)
+df_single_test['y_pred'] = y_pred_single
+df_single_test.to_csv("single_patch_preds.csv", index=False)
+print("Testdaten mit y_pred für Single Patch gespeichert als 'single_patch_preds.csv'.")
+
 # ----- Modelltraining: 9er-Gruppe -----
 print("\nStarte Training für konkatenierten 9er Patch ...")
 mlp_concat = MLPClassifier(
@@ -147,4 +158,10 @@ evaluate_and_report(mlp_concat, X_concat_train, y_concat_train, X_concat_test, y
 
 # Optional: Modell speichern
 joblib.dump(mlp_concat, "mlp_concat_patch.joblib")
+
+# ---- SPEICHERE Testdaten mit Vorhersagen (y_pred) für 9er-Gruppe ----
+y_pred_concat = mlp_concat.predict(X_concat_test)
+df_concat_test['y_pred'] = y_pred_concat
+df_concat_test.to_csv("concat_patch_preds.csv", index=False)
+print("Testdaten mit y_pred für 9er-Gruppe gespeichert als 'concat_patch_preds.csv'.")
 
