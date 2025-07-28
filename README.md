@@ -1,7 +1,7 @@
     Instructions for the preparation of the training data, and the training and evaluation of the models of the main approach
     
-        1. Obtain the clusterings via cluster_plotting.py 
-        1. copy the obtained cluster csv file into the preprocessing_clustering folder
+    1. Obtain the clusterings via cluster_plotting.py 
+        ◦ copy the obtained cluster csv file into the preprocessing_clustering folder
     2. create the embedding csv files in the directory generate_embeddings/UNI/notebooks/ via the dedicated python script depending on the path type you want
         ◦ a folder containing the tif images must be manually added
         ◦ copy the desired embedding into the preprocessing_clustering/embeddings folder 
